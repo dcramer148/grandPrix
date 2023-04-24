@@ -1,0 +1,33 @@
+void PORT4_IRQHandler(void);
+
+void Pause(void){
+
+    //wait 1 second
+    LaunchPad_Output(0);
+    LaunchPad_Output(1);
+    Clock_Delay1ms(1000);
+    LaunchPad_Output(0);
+
+  // restart Jacki
+  UR = UL = PWMNOMINAL;    // reset parameters
+  Mode = 1;
+
+}
+
+void PORT4_IRQHandler(void)
+{
+    //Get which bumper was pressed
+    uint8_t input = Bump_Read();
+    Mode = 0;
+    Motor_Stop();
+   Pause();
+   Motor_Backward(8000, 2000);
+   Clock_Delay1ms(800);
+   Motor_Forward(0,0);
+    //currentState = Stop;
+
+    //Reset the flag
+    P4->IFG &= input;
+    Mode = 1;
+    //cont = 0;
+}
