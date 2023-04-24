@@ -1,0 +1,30 @@
+
+void Pause(void){int i;
+
+    //wait 1 second
+    for(int j = 0; j<10; j++)
+    {
+        Clock_Delay1ms(50);
+        LaunchPad_Output(0);
+        Clock_Delay1ms(50);
+        LaunchPad_Output(1);
+    }
+
+  for(i=600;i>100;i=i-200){
+    Clock_Delay1ms(i); LaunchPad_Output(0); // off
+    Clock_Delay1ms(i); LaunchPad_Output(2); // green
+  }
+  // restart Jacki
+  UR = UL = PWMNOMINAL;    // reset parameters
+  Mode = 1;
+
+}
+
+
+//if(Bump_Read() != 0xED){ // collision
+       //  Mode = 0;
+        //   Motor_Stop();
+        //   Pause();
+         //  Motor_Backward(8000, 2000);
+         //  Clock_Delay1ms(800);
+    //}
