@@ -102,20 +102,23 @@ int32_t Left(int32_t left){
 // assumes track is 500mm
 int32_t Mode=0; // 0 stop, 1 run
 int32_t Error;
-int32_t Ki=1;  // integral controller gain
-int32_t Kp=4;  // proportional controller gain //was 4
+int32_t Error_prior = 0;
+int32_t Ki= 0;  // integral controller gain
+int32_t Kp= 4;  // proportional controller gain //was 4  //Decent values => Kd = 200, Kp = 50 or both 100
+int32_t Kd = 100; //Derivative
 int32_t UR, UL;  // PWM duty 0 to 14,998
 
 #define TOOCLOSE 200 //was 200
 #define DESIRED 250 //was 250
 int32_t SetPoint = 250; // mm //was 250
-int32_t LeftDistance,CenterDistance,RightDistance; // mm
+int32_t LeftDistance,CenterDistance,RightDistance; //mm
 #define TOOFAR 400 // was 400
 
-#define PWMNOMINAL 2500 // was 2500
+#define PWMNOMINAL 7500 // was 2500 -> 7500
 #define SWING 1000 //was 1000
 #define PWMMIN (PWMNOMINAL-SWING)
 #define PWMMAX (PWMNOMINAL+SWING)
+
 void Controller(void){ // runs at 100 Hz
   if(Mode){
     if((LeftDistance>DESIRED)&&(RightDistance>DESIRED)){
@@ -153,11 +156,14 @@ void Controller_Right(void){ // runs at 100 Hz
       Error = SetPoint-RightDistance;
     }*/
 
-    Error = SetPoint-RightDistance;
+    Error = SetPoint - RightDistance;
     //UL = UL + Ki*Error;      // adjust right motor
     UR = PWMNOMINAL+Kp*Error; // proportional control
+    UR = UR + Kd*(Error-Error_prior); //derivative control
     UR = UR + Ki*Error;      // adjust right motor
     UL = PWMNOMINAL-Kp*Error; // proportional control
+
+    Error_prior = Error;
 
     if(UR < (PWMNOMINAL-SWING)) UR = PWMNOMINAL-SWING; // 3,000 to 7,000
     if(UR > (PWMNOMINAL+SWING)) UR = PWMNOMINAL+SWING;
@@ -165,9 +171,35 @@ void Controller_Right(void){ // runs at 100 Hz
     if(UL > (PWMNOMINAL+SWING)) UL = PWMNOMINAL+SWING;
 
     //turns left if the center measurement and right measurement is small enough that we will hit the wall if we don't turn
-    if((RightDistance<250) && (CenterDistance <250)){
+    if((RightDistance < 250) && (CenterDistance < 250)){
         UL = 0;
         UR = PWMNOMINAL;
+    }
+    //Turn left
+   /* if(RightDistance < TOOCLOSE){
+        UL = PWMNOMINAL/2;
+        UR = PWMNOMINAL;
+    }*/
+
+    //turns left if the center measurement is small enough that we will hit the wall if we don't turn
+    if(CenterDistance < 250){
+        UL = 0;
+        UR = PWMNOMINAL;
+    }
+    //Slight Left
+    else if(CenterDistance < 300){
+        UL = PWMNOMINAL/2;
+        UR = PWMNOMINAL;
+    }
+    //Sharper Turns - Turn Right
+    if ((RightDistance > TOOFAR+50) && (CenterDistance > TOOFAR)){
+        UL = PWMNOMINAL;
+        UR = PWMNOMINAL/2;
+    }
+    //Hard Left
+    if(LeftDistance < 275){ //200 min
+        UL = 0;
+        UR = PWMMAX;
     }
 
     PWM_RightMotor(UR);
@@ -360,7 +392,7 @@ void main(void){ // wallFollow wall following implementation
       Error_R_prior = Error_R;*/
 
     }
-    Clock_Delay1ms(100); // delay ~0.1 sec at 48 MHz
+    //Clock_Delay1ms(100); // delay ~0.1 sec at 48 MHz
     t = t + 100; // keep track of timer
 
     if(i >= 100){
