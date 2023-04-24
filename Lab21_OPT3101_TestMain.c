@@ -20,6 +20,9 @@
 #include "../inc/SysTickInts.h"
 #include "../inc/TimerA1.h"
 
+
+void PORT4_IRQHandler(void);
+
 // Select one of the following three output possibilities
 // define USENOKIA
 #define USEOLED 1
@@ -105,16 +108,16 @@ int32_t Error;
 int32_t Error_prior = 0;
 int32_t Ki= 0;  // integral controller gain
 int32_t Kp= 4;  // proportional controller gain //was 4  //Decent values => Kd = 200, Kp = 50 or both 100
-int32_t Kd = 100; //Derivative
+int32_t Kd = 100; //Derivative was 100
 int32_t UR, UL;  // PWM duty 0 to 14,998
 
 #define TOOCLOSE 200 //was 200
-#define DESIRED 250 //was 250
-int32_t SetPoint = 250; // mm //was 250
+#define DESIRED 500 //was 250
+int32_t SetPoint = 500; // mm //was 250
 int32_t LeftDistance,CenterDistance,RightDistance; //mm
-#define TOOFAR 400 // was 400
+#define TOOFAR 575 // was 400
 
-#define PWMNOMINAL 7500 // was 2500 -> 7500
+#define PWMNOMINAL 10500 // was 2500 -> 7500 wordks best at 9000
 #define SWING 1000 //was 1000
 #define PWMMIN (PWMNOMINAL-SWING)
 #define PWMMAX (PWMNOMINAL+SWING)
@@ -142,7 +145,6 @@ void Controller(void){ // runs at 100 Hz
 
   }
 }
-
 void Controller_Right(void){ // runs at 100 Hz
   if(Mode){
     if((RightDistance>DESIRED)){
@@ -197,9 +199,74 @@ void Controller_Right(void){ // runs at 100 Hz
         UR = PWMNOMINAL/2;
     }
     //Hard Left
-    if(LeftDistance < 275){ //200 min
+    if(LeftDistance < 325){ //200 min
         UL = 0;
         UR = PWMMAX;
+    }
+
+    PWM_RightMotor(UR);
+    PWM_LeftMotor(UL);
+    UpdatePosition();
+  }
+}
+
+void Controller_Left(void){ // runs at 100 Hz
+  if(Mode){
+    if((LeftDistance>DESIRED)){
+      SetPoint = (LeftDistance)/2;
+    }else{
+      SetPoint = DESIRED;
+    }
+    /*if(LeftDistance < RightDistance ){
+      Error = LeftDistance-SetPoint;
+    }else {
+      Error = SetPoint-RightDistance;
+    }*/
+
+    Error = SetPoint - LeftDistance;
+    //UL = UL + Ki*Error;      // adjust right motor
+    UL = PWMNOMINAL+Kp*Error; // proportional control
+    UL = UL + Kd*(Error-Error_prior); //derivative control
+    UL = UL + Ki*Error;      // adjust right motor
+    UR = PWMNOMINAL-Kp*Error; // proportional control
+
+    Error_prior = Error;
+
+    if(UL < (PWMNOMINAL-SWING)) UL = PWMNOMINAL-SWING; // 3,000 to 7,000
+    if(UL > (PWMNOMINAL+SWING)) UL = PWMNOMINAL+SWING;
+    if(UR < (PWMNOMINAL-SWING)) UR = PWMNOMINAL-SWING; // 3,000 to 7,000
+    if(UR > (PWMNOMINAL+SWING)) UR = PWMNOMINAL+SWING;
+
+    //turns right if the center measurement and right measurement is small enough that we will hit the wall if we don't turn
+    if((LeftDistance < 250) && (CenterDistance < 250)){
+        UR = 0;
+        UL = PWMNOMINAL;
+    }
+    //Turn left
+   /* if(RightDistance < TOOCLOSE){
+        UL = PWMNOMINAL/2;
+        UR = PWMNOMINAL;
+    }*/
+
+    //turns right if the center measurement is small enough that we will hit the wall if we don't turn
+    if(CenterDistance < 250){
+        UR = 0;
+        UL = PWMNOMINAL;
+    }
+    //Slight Right
+    else if(CenterDistance < 300){
+        UR = PWMNOMINAL/2;
+        UL = PWMNOMINAL;
+    }
+    //Sharper Turns - Turn Left
+    if ((LeftDistance > TOOFAR+50) && (CenterDistance > TOOFAR)){
+        UR = PWMNOMINAL;
+        UL = PWMNOMINAL/2;
+    }
+    //Hard Right
+    if(RightDistance < 275){ //200 min
+        UR = 0;
+        UL = PWMMAX;
     }
 
     PWM_RightMotor(UR);
@@ -207,6 +274,7 @@ void Controller_Right(void){ // runs at 100 Hz
   }
 }
 
+/*
 void Pause(void){int i;
   while(Bump_Read() != 0xED){ // wait for release
     Clock_Delay1ms(200); LaunchPad_Output(0); // off
@@ -227,8 +295,39 @@ void Pause(void){int i;
   // restart Jacki
   UR = UL = PWMNOMINAL;    // reset parameters
   Mode = 1;
+}*/
+void Pause(void){
 
+    //wait 1 second
+    LaunchPad_Output(0);
+    LaunchPad_Output(1);
+    Clock_Delay1ms(1000);
+    LaunchPad_Output(0);
+
+  // restart Jacki
+  UR = UL = PWMNOMINAL;    // reset parameters
+  Mode = 1;
 }
+
+void PORT4_IRQHandler(void)
+{
+    //Get which bumper was pressed
+    uint8_t input = Bump_Read();
+    Mode = 0;
+    Motor_Stop();
+    Pause();
+    PWM_LeftMotorBackwards(8000);
+    PWM_RightMotorBackwards(2000);
+    Clock_Delay1ms(800);
+    Motor_Stop();
+    //currentState = Stop;
+
+    //Reset the flag
+    P4->IFG &= input;
+    Mode = 1;
+    //cont = 0;
+}
+
 
 //For tachometry
 /*
@@ -265,6 +364,7 @@ uint16_t avg(uint16_t *array, int length)
   }
   return (sum/length);
 }
+
 int32_t t;
 uint16_t ActualL;                        // actual rotations per minute
 uint16_t ActualR;
@@ -274,7 +374,7 @@ enum TachDirection LeftDir2;              // direction of left rotation (FORWARD
 int32_t LeftSteps2;                       // number of tachometer steps of left wheel (units of 220/360 = 0.61 mm traveled)
 uint16_t RightTach2[TACHBUFF];            // tachometer period of right wheel (number of 0.0833 usec cycles to rotate 1/360 of a wheel rotation)
 enum TachDirection RightDir2;             // direction of right rotation (FORWARD, STOPPED, REVERSE)
-int32_t RightSteps2;                      // number of tachometer steps of right wheel (units of 220/360 = 0.61 mm traveled)
+int32_t RightSteps2;                     // number of tachometer steps of right wheel (units of 220/360 = 0.61 mm traveled)
 
 
 void main(void){ // wallFollow wall following implementation
@@ -313,29 +413,37 @@ void main(void){ // wallFollow wall following implementation
   EnableInterrupts();
 
   while(1){
- /* if(Bump_Read() != 0xED){ // collision
+  /*if(Bump_Read() != 0xED){ // collision
        Mode = 0;
        Motor_Stop();
        Pause();
     }*/
+     /*if (Bump_Read() != 0xED){
+        Mode = 0;
+        Motor_Stop();
+        Pause();
+        PWM_LeftMotorBackwards(8000);
+        PWM_RightMotorBackwards(2000);
+        Clock_Delay1ms(800);
+     }*/
     if(TxChannel <= 2){ // 0,1,2 means new data
       if(TxChannel==0){
         if(Amplitudes[0] > 1000){
           LeftDistance = FilteredDistances[0] = Left(LPF_Calc(Distances[0]));
         }else{
-          LeftDistance = FilteredDistances[0] = 500;
+          LeftDistance = FilteredDistances[0] = 1000;
         }
       }else if(TxChannel==1){
         if(Amplitudes[1] > 1000){
           CenterDistance = FilteredDistances[1] = LPF_Calc2(Distances[1]);
         }else{
-          CenterDistance = FilteredDistances[1] = 500;
+          CenterDistance = FilteredDistances[1] = 1000;
         }
       }else {
         if(Amplitudes[2] > 1000){
           RightDistance = FilteredDistances[2] = Right(LPF_Calc3(Distances[2]));
         }else{
-          RightDistance = FilteredDistances[2] = 500;
+          RightDistance = FilteredDistances[2] = 1000;
         }
       }
       TxChannel = 3; // 3 means no data
@@ -343,15 +451,11 @@ void main(void){ // wallFollow wall following implementation
       OPT3101_StartMeasurementChannel(channel);
       i = i + 1;
     }
-    Tachometer_Get(&LeftTach2[j], &LeftDir2, &LeftSteps2, &RightTach2[j], &RightDir2, &RightSteps2);
     Controller_Right();
+    Tachometer_Get(&LeftTach2[j], &LeftDir2, &LeftSteps2, &RightTach2[j], &RightDir2, &RightSteps2);
+    //Controller_Left();
     //Update Position
-    UpdatePosition();
-    //Get Readings & Convert
-    xPos = Odometry_GetX()*.0001;
-    yPos = Odometry_GetY()*.0001;
-    headAngle = Odometry_GetAngle()*360/16384;
-
+    //UpdatePosition();
     j = j + 1;
 
     if(j >= TACHBUFF)
@@ -364,7 +468,10 @@ void main(void){ // wallFollow wall following implementation
       // (1/tach step/cycles) * (12,000,000 cycles/sec) * (60 sec/min) * (1/360 rotation/step)
       ActualL = 2000000/avg(LeftTach2, TACHBUFF);
       ActualR = 2000000/avg(RightTach2, TACHBUFF);
-
+      //Get Readings & Convert
+      xPos = Odometry_GetX();//*.0001;
+      yPos = Odometry_GetY();//*.0001;
+      headAngle = Odometry_GetAngle();//*360/16384;
       /*
       //Calculate Error signals
       Error_L = DesiredL - ActualL;
